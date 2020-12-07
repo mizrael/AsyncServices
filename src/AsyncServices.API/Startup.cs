@@ -93,16 +93,12 @@ namespace AsyncServices.API
 
         private void ConfigureLogging(IServiceCollection services)
         {
-            if (Configuration["Hosting"] == "azure")
-            {
-                var appInsightsConfig = TelemetryConfiguration.CreateDefault();
-                appInsightsConfig.InstrumentationKey = Configuration["APPINSIGHTS_INSTRUMENTATIONKEY"];                
-                var logger = new Serilog.LoggerConfiguration()
-                    .WriteTo.Console()
-                    .WriteTo.ApplicationInsights(appInsightsConfig, TelemetryConverter.Traces)
-                    .CreateLogger();
-                services.AddLogging(lb => lb.AddSerilog(logger));
-            }
+            var appInsightsConfig = TelemetryConfiguration.CreateDefault();            
+            var logger = new Serilog.LoggerConfiguration()
+                .WriteTo.Console()
+                .WriteTo.ApplicationInsights(appInsightsConfig, TelemetryConverter.Traces)
+                .CreateLogger();
+            services.AddLogging(lb => lb.AddSerilog(logger));
         }
 
         // This method gets called by the runtime. Use this method to configure the HTTP request pipeline.
