@@ -1,0 +1,65 @@
+version: '3.4'
+
+services:
+  asyncservices.infrastructure.rabbitmq:        
+    image: rabbitmq:3-management-alpine
+    container_name: asyncservices-infrastructure-rabbitmq    
+    restart: always
+    environment:
+      RABBITMQ_DEFAULT_VHOST: "/"
+    ports:     
+      - "15671:15671"
+      - "15672:15672"   
+    networks:
+      - infrastructure
+
+  asyncservices.infrastructure.mongodb:
+    image: mongo:latest
+    container_name: asyncservices-infrastructure-mongodb    
+    restart: always
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: root
+      MONGO_INITDB_ROOT_PASSWORD: password
+    ports:
+      - 27017:27017    
+    networks:
+      - infrastructure    
+
+  asyncservices.api:
+    image: ${DOCKER_REGISTRY}asyncservicesapi
+    container_name: asyncservices-api
+    restart: always
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development      
+    depends_on:
+      - asyncservices.infrastructure.rabbitmq
+      - asyncservices.infrastructure.mongodb
+    healthcheck:
+        test: ["CMD", "curl", "-f", "http://localhost:80/health"]
+        interval: 30s
+        timeout: 10s
+        retries: 5
+    networks:
+      - infrastructure    
+    build:
+      context: .
+      dockerfile: AsyncServices.API/Dockerfile
+
+  asyncservices.worker:
+    image: ${DOCKER_REGISTRY}asyncservicesworker
+    container_name: asyncservices-worker
+    restart: always
+    depends_on:
+      - asyncservices.infrastructure.rabbitmq
+      - asyncservices.infrastructure.mongodb
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development      
+    networks:
+      - infrastructure    
+    build:
+      context: .
+      dockerfile: AsyncServices.Worker/Dockerfile
+
+networks:
+  infrastructure:
+

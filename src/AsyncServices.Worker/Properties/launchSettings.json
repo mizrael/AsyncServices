@@ -1,0 +1,10 @@
+{
+  "profiles": {
+    "AsyncServices.Worker": {
+      "commandName": "Project"
+    },
+    "Docker": {
+      "commandName": "Docker"
+    }
+  }
+}
