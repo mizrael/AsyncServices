@@ -6,7 +6,7 @@
     <ProjectGuid>ee6fc5ce-203e-45e3-8464-3cbc4f2aa09b</ProjectGuid>
     <DockerLaunchAction>LaunchBrowser</DockerLaunchAction>
     <DockerServiceUrl>{Scheme}://localhost:{ServicePort}/swagger</DockerServiceUrl>
-    <DockerServiceName>asyncservices.api</DockerServiceName>
+    <DockerServiceName>api</DockerServiceName>
   </PropertyGroup>
   <ItemGroup>
     <None Include="docker-compose.override.yml">

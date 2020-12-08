@@ -1,9 +1,8 @@
-version: '3.4'
+version: '3.8'
 
 services:
-  asyncservices.infrastructure.rabbitmq:        
+  rabbitmq:        
     image: rabbitmq:3-management-alpine
-    container_name: asyncservices-infrastructure-rabbitmq    
     restart: always
     environment:
       RABBITMQ_DEFAULT_VHOST: "/"
@@ -13,9 +12,8 @@ services:
     networks:
       - infrastructure
 
-  asyncservices.infrastructure.mongodb:
+  mongodb:
     image: mongo:latest
-    container_name: asyncservices-infrastructure-mongodb    
     restart: always
     environment:
       MONGO_INITDB_ROOT_USERNAME: root
@@ -25,41 +23,60 @@ services:
     networks:
       - infrastructure    
 
-  asyncservices.api:
-    image: ${DOCKER_REGISTRY}asyncservicesapi
-    container_name: asyncservices-api
+  api:
+    image: ${DOCKER_REGISTRY}asyncservicesapi:latest   
     restart: always
     environment:
       - ASPNETCORE_ENVIRONMENT=Development      
+      - DOTNET_ENVIRONMENT=Development
+      - ASPNETCORE_URLS=https://+:443;http://+:80
     depends_on:
-      - asyncservices.infrastructure.rabbitmq
-      - asyncservices.infrastructure.mongodb
-    healthcheck:
-        test: ["CMD", "curl", "-f", "http://localhost:80/health"]
-        interval: 30s
-        timeout: 10s
-        retries: 5
+      - rabbitmq
+      - mongodb
     networks:
       - infrastructure    
+    ports:
+      - 15000:80   
+      - 15001:443
     build:
       context: .
       dockerfile: AsyncServices.API/Dockerfile
+    volumes:
+      - ${APPDATA}/Microsoft/UserSecrets:/root/.microsoft/usersecrets:ro
+      - ${APPDATA}/ASP.NET/Https:/root/.aspnet/https:ro
 
-  asyncservices.worker:
-    image: ${DOCKER_REGISTRY}asyncservicesworker
-    container_name: asyncservices-worker
+  worker:
+    image: ${DOCKER_REGISTRY}asyncservicesworker:latest
     restart: always
     depends_on:
-      - asyncservices.infrastructure.rabbitmq
-      - asyncservices.infrastructure.mongodb
+      - rabbitmq
+      - mongodb
     environment:
       - ASPNETCORE_ENVIRONMENT=Development      
+      - DOTNET_ENVIRONMENT=Development
+    deploy:
+      mode: replicated
+      replicas: 3
     networks:
       - infrastructure    
     build:
       context: .
       dockerfile: AsyncServices.Worker/Dockerfile
 
+  loki:
+    image: grafana/loki:master
+    ports:
+      - "3100:3100"
+    command: -config.file=/etc/loki/local-config.yaml
+    networks:
+      - infrastructure
+
+  grafana:
+    image: grafana/grafana:master
+    ports:
+      - "3000:3000"
+    networks:
+      - infrastructure
+
 networks:
   infrastructure:
-
