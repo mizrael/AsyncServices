@@ -4,25 +4,24 @@ using Microsoft.Extensions.Logging;
 using AsyncServices.Common.Services;
 using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
+using System.Collections.Generic;
 
 namespace AsyncServices.Common.Queues.RabbitMQ
 {
+    public record RabbitSubscriberOptions(string ExchangeName, string QueueName, string DeadLetterExchangeName, string DeadLetterQueue);
+
     public class RabbitSubscriber : ISubscriber, IDisposable
     {
         private readonly IBusConnection _connection;
-        private readonly string _exchangeName;
         private readonly IDecoder _decoder;
         private readonly ILogger<RabbitSubscriber> _logger;
+        private readonly RabbitSubscriberOptions _options;
         private IModel _channel;
-        private QueueDeclareOk _queue;
 
-        public RabbitSubscriber(IBusConnection connection, string exchangeName, IDecoder decoder, ILogger<RabbitSubscriber> logger)
+        public RabbitSubscriber(IBusConnection connection, RabbitSubscriberOptions options, IDecoder decoder, ILogger<RabbitSubscriber> logger)
         {
-            if (string.IsNullOrWhiteSpace(exchangeName))
-                throw new ArgumentException($"'{nameof(exchangeName)}' cannot be null or whitespace", nameof(exchangeName));
-            _exchangeName = exchangeName;
-
             _connection = connection ?? throw new ArgumentNullException(nameof(connection));
+            _options = options ?? throw new ArgumentNullException(nameof(options));
             _decoder = decoder ?? throw new ArgumentNullException(nameof(decoder));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         }
@@ -33,21 +32,30 @@ namespace AsyncServices.Common.Queues.RabbitMQ
 
             _channel = _connection.CreateChannel();
 
-            _channel.ExchangeDeclare(exchange: _exchangeName, type: ExchangeType.Fanout);
+            _channel.ExchangeDeclare(exchange: _options.DeadLetterExchangeName, type: ExchangeType.Fanout);
+            _channel.QueueDeclare(queue: _options.DeadLetterQueue,
+                durable: true,
+                exclusive: false,
+                autoDelete: false,
+                arguments: null);
+            _channel.QueueBind(_options.DeadLetterQueue, _options.DeadLetterExchangeName, routingKey: string.Empty, arguments: null);
 
-            // since we're using a Fanout exchange, we don't specify the name of the queue
-            // but we let Rabbit generate one for us. This also means that we need to store the
-            // queue name to be able to consume messages from it
-            _queue = _channel.QueueDeclare(queue: string.Empty,
+            _channel.ExchangeDeclare(exchange: _options.ExchangeName, type: ExchangeType.Fanout);
+            _channel.QueueDeclare(queue: _options.QueueName,
                 durable: false,
                 exclusive: false,
                 autoDelete: true,
-                arguments: null);
-
-            _channel.QueueBind(_queue.QueueName, _exchangeName, string.Empty, null);
+                arguments: new Dictionary<string, object>()
+                    {
+                        {"x-dead-letter-exchange", _options.DeadLetterExchangeName},
+                        {"x-dead-letter-routing-key", _options.ExchangeName}
+                    });
+            _channel.QueueBind(_options.QueueName, _options.ExchangeName, string.Empty, null);
 
             _channel.CallbackException += (sender, ea) =>
             {
+                _logger.LogError(ea.Exception, "the RabbitMQ Channel has encountered an error: {ExceptionMessage}", ea.Exception.Message);
+
                 InitChannel();
                 InitSubscription();
             };
@@ -58,8 +66,8 @@ namespace AsyncServices.Common.Queues.RabbitMQ
             var consumer = new AsyncEventingBasicConsumer(_channel);
 
             consumer.Received += OnMessageReceivedAsync;
-            
-            _channel.BasicConsume(queue: _queue.QueueName, autoAck: false, consumer: consumer);
+
+            _channel.BasicConsume(queue: _options.QueueName, autoAck: false, consumer: consumer);
         }
 
         private async Task OnMessageReceivedAsync(object sender, BasicDeliverEventArgs eventArgs)
@@ -81,24 +89,22 @@ namespace AsyncServices.Common.Queues.RabbitMQ
             }
 
             try
-            {                
+            {
                 await this.OnMessage(this, new MessageReceived(message));
-                channel.BasicAck(eventArgs.DeliveryTag, false);
+                channel.BasicAck(eventArgs.DeliveryTag, multiple: false);
             }
             catch (Exception ex)
             {
                 var errorMsg = eventArgs.Redelivered ? "a fatal error has occurred while processing Message '{MessageId}' with type: '{MessageType}' from Exchange '{ExchangeName}' : {ExceptionMessage} . Rejecting..." :
                     "an error has occurred while processing Message '{MessageId}' with type: '{MessageType}' from Exchange '{ExchangeName}' : {ExceptionMessage} . Nacking...";
 
-                _logger.LogWarning(ex, errorMsg, message.Id, message.MessageType, _exchangeName, ex.Message);
+                _logger.LogWarning(ex, errorMsg, message.Id, message.MessageType, _options.ExchangeName, ex.Message);
 
-                //TODO: delayed renqueue, dead-lettering
-
-                if (eventArgs.Redelivered) 
-                    channel.BasicReject(eventArgs.DeliveryTag, false);
+                if (eventArgs.Redelivered)
+                    channel.BasicReject(eventArgs.DeliveryTag, requeue: false);
                 else
-                    channel.BasicNack(eventArgs.DeliveryTag, false, true);
-            }            
+                    channel.BasicNack(eventArgs.DeliveryTag, multiple: false, requeue: true);
+            }
         }
 
         public event AsyncEventHandler<MessageReceived> OnMessage;

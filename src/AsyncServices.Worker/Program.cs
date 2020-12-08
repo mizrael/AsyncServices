@@ -12,6 +12,9 @@ using RabbitMQ.Client;
 using MongoDB.Driver;
 using AsyncServices.Common.Persistence.Mongo;
 using AsyncServices.Worker.CommandHandlers.Mongo;
+using Serilog;
+using Serilog.Formatting.Compact;
+using Serilog.Sinks.Loki;
 
 namespace AsyncServices.Worker
 {
@@ -22,8 +25,22 @@ namespace AsyncServices.Worker
 
         static IHostBuilder CreateHostBuilder(string[] args) =>
             Host.CreateDefaultBuilder(args)
+
             .ConfigureServices((hostContext, services) =>
             {
+                services.AddLogging(logging =>{                    
+                    var credentials = new NoAuthCredentials(hostContext.Configuration["Loki"]);
+
+                    var logger = new LoggerConfiguration()
+                                    .MinimumLevel.Debug()
+                                    .Enrich.WithMachineName()
+                                    .Enrich.WithEnvironmentUserName()                                                                     
+                                    .WriteTo.LokiHttp(credentials)
+                                    .WriteTo.Console(new RenderedCompactJsonFormatter())
+                                    .CreateLogger();
+                    logging.AddSerilog(logger);
+                });
+
                 var encoder = new JsonEncoder();                
                 services.AddSingleton<IEncoder>(encoder);
                 services.AddSingleton<IDecoder>(encoder);
@@ -63,8 +80,12 @@ namespace AsyncServices.Worker
                     var rabbitConfig = config.GetSection("RabbitMQ");
 
                     var exchangeName = rabbitConfig["Exchange"];
+                    var queueName = rabbitConfig["Queue"];
+                    var deadLetterExchange = rabbitConfig["DeadLetterExchange"];
+                    var deadLetterQueue = rabbitConfig["DeadLetterQueue"];
+                    var options = new RabbitSubscriberOptions(exchangeName, queueName, deadLetterExchange, deadLetterQueue);
 
-                    return new RabbitSubscriber(connection, exchangeName, decoder, logger);
+                    return new RabbitSubscriber(connection, options, decoder, logger);
                 });
 
                 services.AddSingleton(ctx =>

@@ -1,19 +1,23 @@
 ﻿using System;
 using RabbitMQ.Client;
+using Polly;
+using Microsoft.Extensions.Logging;
 
 namespace AsyncServices.Common.Queues.RabbitMQ
 {
     public class RabbitPersistentConnection : IDisposable, IBusConnection
     {
+        private readonly ILogger<RabbitPersistentConnection> _logger;
         private readonly IConnectionFactory _connectionFactory;
         private IConnection _connection;
         private bool _disposed;
 
         private readonly object semaphore = new object();
 
-        public RabbitPersistentConnection(IConnectionFactory connectionFactory)
+        public RabbitPersistentConnection(IConnectionFactory connectionFactory, ILogger<RabbitPersistentConnection> logger)
         {
             _connectionFactory = connectionFactory ?? throw new ArgumentNullException(nameof(connectionFactory));
+            _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         }
 
         public bool IsConnected => _connection != null && _connection.IsOpen && !_disposed;
@@ -34,7 +38,17 @@ namespace AsyncServices.Common.Queues.RabbitMQ
                 if (IsConnected)
                     return;
 
-                _connection = _connectionFactory.CreateConnection();
+                var policy = Policy
+                                .Handle<Exception>()
+                                .WaitAndRetry(5,
+                                    retryAttempt => TimeSpan.FromSeconds(Math.Pow(2, retryAttempt)),
+                                    (ex, timeSpan, context) =>
+                                    {
+                                        _logger.LogError(ex, $"an exception has occurred while opening RabbitMQ connection: {ex.Message}");
+                                    });
+
+                _connection = policy.Execute(_connectionFactory.CreateConnection);
+
                 _connection.ConnectionShutdown += (s, e) => TryConnect();
                 _connection.CallbackException += (s, e) => TryConnect();
                 _connection.ConnectionBlocked += (s, e) => TryConnect();
