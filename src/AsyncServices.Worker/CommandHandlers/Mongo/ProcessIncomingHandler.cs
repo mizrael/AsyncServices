@@ -13,8 +13,7 @@ namespace AsyncServices.Worker.CommandHandlers.Mongo
     {
         private readonly IDbContext _dbContext;
         private readonly ILogger<ProcessIncomingHandler> _logger;
-
-        private static long _run = 0;
+        private readonly static Random _rand = new Random();
 
         public ProcessIncomingHandler(ILogger<ProcessIncomingHandler> logger, IDbContext dbContext)
         {
@@ -24,22 +23,19 @@ namespace AsyncServices.Worker.CommandHandlers.Mongo
 
         public async Task Handle(ProcessIncoming command, CancellationToken cancellationToken)
         {
-            _run++;
-
             if (command is null)
                 throw new ArgumentNullException(nameof(command));
 
-            _logger.LogInformation("{HandlerExecutionCount} - processing request '{MessageId}' ...", _run, command.Id);
+            _logger.LogInformation("processing request '{MessageId}' ...", command.Id);
 
             var processedAt = DateTime.UtcNow;
 
             // just pretend we're doing something...
-            await Task.Delay(2000);            
-            if ((_run & 1) == 0){
-                _logger.LogError("{HandlerExecutionCount} - failed '{MessageId}' whooops", _run, command.Id);
-                throw new Exception($"{_run} whooops!");            
-            }                
+            await Task.Delay(2000);         
 
+            if (_rand.NextDouble() > .5)                
+                throw new Exception($"whooops!");            
+            
             BsonDocument payload = null;
             if(command.Payload is not null)
             {
@@ -50,7 +46,7 @@ namespace AsyncServices.Worker.CommandHandlers.Mongo
             var model = new ProcessedRequest(command.Id, command.CreatedAt, processedAt, DateTime.UtcNow, payload);
             await _dbContext.ProcessedRequests.InsertOneAsync(model, options: null, cancellationToken);
 
-            _logger.LogInformation("{HandlerExecutionCount} - request '{MessageId}' processed!", _run, command.Id);
+            _logger.LogInformation("request '{MessageId}' processed!", command.Id);
         }
     }
 }
