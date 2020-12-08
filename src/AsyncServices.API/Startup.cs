@@ -14,6 +14,9 @@ using Serilog;
 using MongoDB.Driver;
 using AsyncServices.Common.Persistence.Mongo;
 using AsyncServices.Worker.Extensions;
+using System.Collections.Generic;
+using System;
+using AsyncServices.Common.Commands;
 
 namespace AsyncServices.API
 {
@@ -41,7 +44,12 @@ namespace AsyncServices.API
             services.AddSingleton<IEncoder>(encoder);
             services.AddSingleton<IDecoder>(encoder);
 
-            services.AddSingleton<IQueueMessageFactory, QueueMessageFactory>();
+            services.AddSingleton<IQueueMessageFactory>(ctx =>
+            {
+                var factory = new QueueMessageFactory(ctx.GetRequiredService<IEncoder>());
+                factory.RegisterMessageIdGenerator<ProcessIncoming>(p => p.Id);
+                return factory;
+            });
 
             services.AddSingleton<IConnectionFactory>(ctx =>
             {
@@ -93,7 +101,7 @@ namespace AsyncServices.API
 
         private void ConfigureLogging(IServiceCollection services)
         {
-            var appInsightsConfig = TelemetryConfiguration.CreateDefault();            
+            var appInsightsConfig = TelemetryConfiguration.CreateDefault();
             var logger = new Serilog.LoggerConfiguration()
                 .WriteTo.Console()
                 .WriteTo.ApplicationInsights(appInsightsConfig, TelemetryConverter.Traces)
@@ -113,10 +121,10 @@ namespace AsyncServices.API
             else
             {
                 app.UseHttpsRedirection();
-            }                
+            }
 
             app.UseRouting();
-            app.UseAuthorization();            
+            app.UseAuthorization();
 
             app.UseEndpoints(endpoints =>
             {
